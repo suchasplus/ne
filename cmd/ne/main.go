@@ -81,7 +81,7 @@ func main() {
 				cli.ShowAppHelpAndExit(cCtx, 1)
 				return fmt.Errorf("error: search key argument is required")
 			}
-			searchKey := cCtx.Args().First()
+			searchKey := strings.ToLower(cCtx.Args().First())
 
 			actualDBPath := dbPathFlag
 			if actualDBPath == "" {
