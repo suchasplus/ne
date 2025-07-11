@@ -61,18 +61,11 @@ A blazingly fast command-line dictionary tool powered by Go and BoltDB.
 
 ## Usage
 
-### Looking Up a Word
-
 To look up a word, simply pass it as an argument to the `ne` command.
 
 **Syntax:**
 ```bash
 ./ne [options] <term>
-```
-
-**Example:**
-```bash
-./ne magnificent
 ```
 
 **Options:**
@@ -81,19 +74,52 @@ To look up a word, simply pass it as an argument to the `ne` command.
 -   `--dbpath <path>`: Specify a custom path to the `ecdict.bbolt` database file.
 -   `--verbose`, `-v`: Enable detailed logging.
 
-### Rebuilding the Database
+## Examples
 
-If you update the source `ecdict.csv` file, you can rebuild the database using `kvbuilder`.
+### Standard Lookup
 
-**Syntax:**
+A standard lookup displays the most common fields in a clean table.
+
 ```bash
-./kvbuilder [options]
+$ ./ne hello
+
+┌───────────────┬────────────────────────────────────────────────────────────┐
+│ term          │ hello                                                      │
+├───────────────┼────────────────────────────────────────────────���───────────┤
+│ translation   │ interj. 喂, 嘿                                             │
+├───────────────┼────────────────────────────────────────────────────────────┤
+│ definition    │ n. an expression of greeting                               │
+├───────────────┼────────────────────────────────────────────────────────────┤
+│ exchange      │ s:hellos                                                   │
+└───────────────┴────────────────────────────────────────────────────────────┘
 ```
-**Options:**
--   `--csv <path>`: Path to the source CSV file.
--   `--dbpath <path>`: Path where the output `ecdict.bbolt` database will be saved.
--   `--bucket <name>`: Specify a custom bucket name within the database.
+
+### JSON Output
+
+For scripting or integration with other tools, you can output the full entry as a JSON object.
+
+```bash
+$ ./ne hello --json
+
+{
+  "term": "hello",
+  "data": {
+    "audio": "",
+    "bnc": "2319",
+    "collins": "3",
+    "definition": "n. an expression of greeting",
+    "detail": "",
+    "exchange": "s:hellos",
+    "frq": "2238",
+    "oxford": "1",
+    "phonetic": "hә'lәu",
+    "pos": "",
+    "tag": "zk gk",
+    "translation": "interj. 喂, 嘿"
+  }
+}
+```
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for details.
