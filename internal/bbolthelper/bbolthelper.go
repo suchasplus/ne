@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/agnivade/levenshtein"
 	bolt "go.etcd.io/bbolt"
@@ -326,7 +327,7 @@ func (s *DBStore) ImportFromCSV(csvFilePath string, progressReportInterval int) 
 				continue
 			}
 
-			key := record[0]
+			key := strings.ToLower(record[0])
 			valueMap := make(map[string]string)
 
 			for i := 1; i < len(record); i++ {
