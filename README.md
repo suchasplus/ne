@@ -1,8 +1,8 @@
-# ne (玩转 English)
+# ne (玩转 ENglish)
 
 A blazingly fast command-line dictionary tool powered by Go and BoltDB.
 
-`ne` (stands for "玩转 English" - "Mastering English") provides instant, offline access to a comprehensive English dictionary directly from your terminal.
+`ne` (stands for "玩转 ENglish" - "Mastering ENglish") provides instant, offline access to a comprehensive English dictionary directly from your terminal.
 
 ## Features
 
