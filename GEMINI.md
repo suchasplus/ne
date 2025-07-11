@@ -4,7 +4,7 @@ This file provides context for the Gemini AI assistant to understand the `ne` pr
 
 ## Project Overview
 
-`ne` is a command-line dictionary tool written in Go. It uses a local [BoltDB](https://github.com/etcd-io/bbolt) database for fast word lookups. The dictionary data is built from a source CSV file using a separate `kvbuilder` tool.
+`ne` (stands for "玩转 English" - "Mastering English") is a command-line dictionary tool written in Go. It uses a local [BoltDB](https://github.com/etcd-io/bbolt) database for fast word lookups. The dictionary data is built from a source CSV file using a separate `kvbuilder` tool.
 
 The core functionalities are split between two binaries:
 1.  **`kvbuilder`**: A tool to create or update the BoltDB database from a large CSV file (`ecdict.csv`). It also compacts the database for optimal size.
@@ -71,10 +71,18 @@ go build -o ne ./cmd/ne
 
 Once the `kvbuilder` is built and the CSV is decompressed, create the BoltDB database.
 
+**Usage:** `./kvbuilder [global options]`
+
+**Example:**
 ```bash
 # This command reads from assets/ecdict.csv and creates ecdict.bbolt
 ./kvbuilder --csv assets/ecdict.csv
 ```
+
+**Global Options:**
+-   `--csv FILE_PATH`, `-c FILE_PATH`: Load CSV from `FILE_PATH`.
+-   `--dbpath string`, `-d string`: Path to bbolt DB.
+-   `--bucket string`, `-b string`: Name of the bucket within the database.
 
 The `kvbuilder` will automatically run a compaction operation upon completion.
 
