@@ -44,3 +44,13 @@ Thumbs.db
 # Based on the cmd directory
 ne
 kvbuilder
+
+# Bazel
+/bazel-*
+
+# Directories for the Bazel IntelliJ plugin containing the generated
+# IntelliJ project files and plugin configuration. Separate directories are
+# for the IntelliJ, Android Studio and CLion versions of the plugin.
+/.ijwb/
+/.aswb/
+/.clwb/

@@ -1,0 +1,24 @@
+load("@bazel_gazelle//:def.bzl", "gazelle")
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+
+# gazelle:prefix github.com/suchasplus/ne
+gazelle(name = "gazelle")
+
+go_library(
+    name = "ne_lib",
+    srcs = ["demo.go"],
+    importpath = "github.com/suchasplus/ne",
+    visibility = ["//visibility:private"],
+    deps = [
+        "@com_github_edsrzf_mmap_go//:mmap-go",
+        "@com_github_olekukonko_tablewriter//:tablewriter",
+        "@com_github_urfave_cli_v3//:cli",
+        "@org_uber_go_zap//:zap",
+    ],
+)
+
+go_binary(
+    name = "ne",
+    embed = [":ne_lib"],
+    visibility = ["//visibility:public"],
+)

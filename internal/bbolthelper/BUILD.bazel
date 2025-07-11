@@ -1,0 +1,20 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "bbolthelper",
+    srcs = ["bbolthelper.go"],
+    importpath = "github.com/suchasplus/ne/internal/bbolthelper",
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "@com_github_agnivade_levenshtein//:levenshtein",
+        "@io_etcd_go_bbolt//:bbolt",
+        "@org_uber_go_zap//:zap",
+    ],
+)
+
+go_test(
+    name = "bbolthelper_test",
+    srcs = ["bbolthelper_test.go"],
+    embed = [":bbolthelper"],
+    deps = ["@org_uber_go_zap//:zap"],
+)
