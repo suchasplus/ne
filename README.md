@@ -97,26 +97,27 @@ $ ./ne hello
 
 ### Fuzzy Search for Misspellings
 
-If you misspell a word, `ne` will automatically search for the closest match.
+If you misspell a word, `ne` will automatically search for similar terms. If multiple suggestions are found, it will list the most likely candidates based on word frequency and length.
 
 ```bash
-$ ./ne devlop
+$ ./ne develp
 
-Term 'devlop' not found. Searching for similar terms...
-Did you mean 'develop'?
+Term 'develp' not found. Searching for similar terms...
+Did you mean one of these?
+ - devel
+ - develop
+```
+
+If only one likely candidate is found, it will be displayed directly:
+```bash
+$ ./ne deveoper
+
+Term 'deveoper' not found. Searching for similar terms...
+Did you mean 'developer'?
 
 ┌───────────────┬────────────────────────────────────────────────────────────┐
-│ term          │ develop                                                    │
-├───────────────┼────────────────────────────────────────────────────────────┤
-│ translation   │ vt. 开发, 发展, 研制, 使成长, 显现出, 冲洗(胶片)             │
-│               │ vi. 发育, 生长, 发展, 显露                                 │
-├───────────────┼────────────────────────────────────────────────���───────────┤
-│ definition    │ grow, progress, unfold, or evolve through a process of     │
-│               │ natural growth, differentiation, or a conducive            │
-│               │ environment                                                │
-├───────────────┼────────────────────────────────────────────────────────────┤
-│ exchange      │ d:developed/p:developed/s:develops/i:developing            │
-└───────────────┴────────────────────────────────────────────────────────────┘
+│ term          │ developer                                                  │
+# ... (output continues)
 ```
 
 ### JSON Output
