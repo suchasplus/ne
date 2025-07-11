@@ -4,12 +4,11 @@ This file provides context for the Gemini AI assistant to understand the `ne` pr
 
 ## Project Overview
 
-`ne` is a command-line dictionary tool written in Go. It uses a local [BoltDB](https://github.com/etcd-io/bbolt) database for fast word lookups. The dictionary data is built from a source CSV file.
+`ne` is a command-line dictionary tool written in Go. It uses a local [BoltDB](https://github.com/etcd-io/bbolt) database for fast word lookups. The dictionary data is built from a source CSV file using a separate `kvbuilder` tool.
 
-The core functionalities are:
-1.  **Build**: Create or update the BoltDB database from a large CSV file (`ecdict.csv`).
-2.  **Lookup**: Query the database for a word and display its definition, translation, phonetic transcription, and other details in a formatted table.
-3.  **Compact**: Optimize the database file size and performance after large write operations (like building).
+The core functionalities are split between two binaries:
+1.  **`kvbuilder`**: A tool to create or update the BoltDB database from a large CSV file (`ecdict.csv`). It also compacts the database for optimal size.
+2.  **`ne`**: The main CLI tool to query the database for a word and display its definition, translation, phonetic transcription, and other details in a formatted table.
 
 ## Tech Stack
 
@@ -25,17 +24,18 @@ The core functionalities are:
 
 ```
 .
-├── assets/
+├─�� assets/
 │   ├── ecdict.csv.xz   # The compressed dictionary data source. MUST be decompressed before use.
 │   └── README.md       # Instructions on how to decompress the data file.
 ├── cmd/
-│   ├── ne/             # Main application entry point for the 'ne' CLI tool.
-│   └── ...
+│   ├── kvbuilder/      # The source for the 'kvbuilder' tool, which builds the database.
+│   └── ne/             # The source for the 'ne' dictionary lookup tool.
 └── internal/
     └── bbolthelper/    # A helper package to abstract BoltDB operations (open, close, get, put, import, compact).
 ```
 
--   **`cmd/ne/main.go`**: The main entry point for the application. It defines the CLI commands (`lookup`, `build`, `compact`) and their flags.
+-   **`cmd/kvbuilder/main.go`**: The entry point for the database builder tool.
+-   **`cmd/ne/main.go`**: The main entry point for the dictionary lookup application.
 -   **`internal/bbolthelper/bbolthelper.go`**: Contains the `DBStore` struct and all logic for interacting with the BoltDB database. This includes serializing/deserializing data with `encoding/gob`.
 -   **`assets/ecdict.csv.xz`**: The primary data source. It is compressed with `xz`.
 
@@ -56,30 +56,33 @@ xz -d ecdict.csv.xz
 cd ..
 ```
 
-### 2. Building the Application
+### 2. Building the Applications
 
-The application can be built using the standard Go toolchain.
+The project produces two executables.
 
 ```bash
-# Build the executable (output will be named 'ne')
+# Build the database builder tool
+go build -o kvbuilder ./cmd/kvbuilder
+
+# Build the dictionary lookup tool
 go build -o ne ./cmd/ne
 ```
 
 ### 3. Building the Database
 
-Once the application is built and the CSV is decompressed, create the BoltDB database.
+Once the `kvbuilder` is built and the CSV is decompressed, create the BoltDB database.
 
 ```bash
 # This command reads from assets/ecdict.csv and creates ecdict.bbolt
-./ne build --csv assets/ecdict.csv
+./kvbuilder --csv assets/ecdict.csv
 ```
 
-The `build` command will automatically run the `compact` operation upon completion.
+The `kvbuilder` will automatically run a compaction operation upon completion.
 
 ### 4. Running the Application (Looking up words)
 
 ```bash
-# Look up a word
+# Look up a word using the 'ne' tool
 ./ne lookup <word>
 
 # Example
