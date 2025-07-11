@@ -17,7 +17,8 @@ test:
 	@echo "Running tests with Bazel..."
 	@bazel test //...
 
-# Clean all Bazel build artifacts and reset the cache.
+# Clean all Bazel build artifacts, reset the cache, and remove old binaries.
 clean:
-	@echo "Cleaning Bazel artifacts..."
+	@echo "Cleaning Bazel artifacts and old binaries..."
 	@bazel clean
+	@rm -f ne kvbuilder
