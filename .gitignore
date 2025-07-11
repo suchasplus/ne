@@ -42,8 +42,10 @@ Thumbs.db
 
 # Project-specific binaries
 # Based on the cmd directory
+# also csv raw file
 ne
 kvbuilder
+ecdict.csv
 
 # Bazel
 /bazel-*
@@ -54,3 +56,5 @@ kvbuilder
 /.ijwb/
 /.aswb/
 /.clwb/
+
+

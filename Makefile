@@ -22,3 +22,4 @@ clean:
 	@echo "Cleaning Bazel artifacts and old binaries..."
 	@bazel clean
 	@rm -f ne kvbuilder
+	@rm -f assets/ecdict.csv
