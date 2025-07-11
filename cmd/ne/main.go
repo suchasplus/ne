@@ -136,16 +136,53 @@ func main() {
 			}
 
 			if !found {
-				msg := "term not found"
-				if jsonFlag {
-					jsonResult := JsonResult{Term: searchKey, Error: msg}
-					jsonValue, _ := json.Marshal(jsonResult)
-					fmt.Println(string(jsonValue))
-				} else {
-					fmt.Printf("%s '%s' in bucket '%s' of database '%s'.\n", msg, searchKey, actualBucketName, actualDBPath)
+				// Exact match failed, try to find similar words.
+				if !jsonFlag {
+					fmt.Printf("Term '%s' not found. Searching for similar terms...\n", searchKey)
 				}
-				logger.Warn(msg, zap.String("key", searchKey), zap.String("dbPath", actualDBPath), zap.String("bucket", actualBucketName))
-				return nil // Not an error for the CLI if key simply not found
+
+				suggestions, err := dbStore.FindSimilar(searchKey, 2) // Max distance of 2
+				if err != nil {
+					// Handle error from FindSimilar itself
+					logger.Error("Fuzzy search failed", zap.Error(err))
+					fmt.Fprintf(os.Stderr, "Error during fuzzy search: %v\n", err)
+					return err
+				}
+
+				if len(suggestions) == 0 {
+					msg := "term not found"
+					if jsonFlag {
+						jsonResult := JsonResult{Term: searchKey, Error: msg}
+						jsonValue, _ := json.Marshal(jsonResult)
+						fmt.Println(string(jsonValue))
+					} else {
+						fmt.Printf("No similar terms found for '%s'.\n", searchKey)
+					}
+					return nil
+				}
+
+				// We have suggestions, take the first one as the best match.
+				bestMatch := suggestions[0]
+				if !jsonFlag {
+					fmt.Printf("Did you mean '%s'?\n\n", bestMatch)
+				}
+
+				// Perform a lookup for the best match.
+				valueMap, found, err = dbStore.Get(bestMatch)
+				if err != nil || !found {
+					// This should be rare if FindSimilar returned it, but handle it.
+					msg := "could not retrieve suggestion"
+					if jsonFlag {
+						jsonResult := JsonResult{Term: bestMatch, Error: msg}
+						jsonValue, _ := json.Marshal(jsonResult)
+						fmt.Println(string(jsonValue))
+					} else {
+						fmt.Fprintf(os.Stderr, "Error: could not retrieve suggestion '%s'.\n", bestMatch)
+					}
+					return err
+				}
+				// Update searchKey to the one we actually found for display purposes.
+				searchKey = bestMatch
 			}
 
 			if jsonFlag {

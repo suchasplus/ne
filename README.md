@@ -10,6 +10,7 @@ A blazingly fast command-line dictionary tool powered by Go and BoltDB.
 -   **Extremely Fast**: Built on Go and using BoltDB, a high-performance key-value store, for near-instantaneous lookups.
 -   **Simple & Clean UI**: Results are displayed in a clean, readable table format.
 -   **Flexible Output**: Supports both human-readable tables and structured `JSON` output for scripting.
+-   **Fuzzy Search**: Automatically finds the closest match for common misspellings (e.g., "devlop" -> "develop").
 -   **Comprehensive Data**: Uses the extensive [ECDICT](https://github.com/skywind3000/ECDICT) dictionary data.
 
 ## Getting Started
@@ -85,12 +86,36 @@ $ ./ne hello
 
 ┌───────────────┬────────────────────────────────────────────────────────────┐
 │ term          │ hello                                                      │
-├───────────────┼────────────────────────────────────────────────-───────────┤
+├────��──────────┼────────────────────────────────────────────────-───────────┤
 │ translation   │ interj. 喂, 嘿                                             │
 ├───────────────┼────────────────────────────────────────────────────────────┤
 │ definition    │ n. an expression of greeting                               │
 ├───────────────┼────────────────────────────────────────────────────────────┤
 │ exchange      │ s:hellos                                                   │
+└───────────────┴────────────────────────────────────────────────────────────┘
+```
+
+### Fuzzy Search for Misspellings
+
+If you misspell a word, `ne` will automatically search for the closest match.
+
+```bash
+$ ./ne devlop
+
+Term 'devlop' not found. Searching for similar terms...
+Did you mean 'develop'?
+
+┌───────────────┬────────────────────────────────────────────────────────────┐
+│ term          │ develop                                                    │
+├───────────────┼────────────────────────────────────────────────────────────┤
+│ translation   │ vt. 开发, 发展, 研制, 使成长, 显现出, 冲洗(胶片)             │
+│               │ vi. 发育, 生长, 发展, 显露                                 │
+├───────────────┼────────────────────────────────────────────────���───────────┤
+│ definition    │ grow, progress, unfold, or evolve through a process of     │
+│               │ natural growth, differentiation, or a conducive            │
+│               │ environment                                                │
+├───────────────┼────────────────────────────────────────────────────────────┤
+│ exchange      │ d:developed/p:developed/s:develops/i:developing            │
 └───────────────┴────────────────────────────────────────────────────────────┘
 ```
 

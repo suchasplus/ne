@@ -10,6 +10,7 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 	"go.uber.org/zap"
+	"github.com/agnivade/levenshtein"
 )
 
 const (
@@ -150,6 +151,57 @@ func (s *DBStore) Get(key string) (map[string]string, bool, error) {
 		return nil, false, err
 	}
 	return valueMap, found, nil
+}
+
+// FindSimilar searches for words with a similar spelling to the input word.
+// It uses the Levenshtein distance to measure similarity and includes performance optimizations.
+func (s *DBStore) FindSimilar(word string, maxDistance int) ([]string, error) {
+	var suggestions []string
+	bestDistance := maxDistance
+
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(s.bucketName))
+		if b == nil {
+			return fmt.Errorf("bucket '%s' not found during FindSimilar operation", s.bucketName)
+		}
+
+		c := b.Cursor()
+		inputLen := len(word)
+
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			dbWord := string(k)
+
+			// Length pruning: if the length difference is greater than the best distance,
+			// the Levenshtein distance must also be greater.
+			if abs(len(dbWord)-inputLen) > bestDistance {
+				continue
+			}
+
+			dist := levenshtein.ComputeDistance(word, dbWord)
+
+			if dist < bestDistance {
+				bestDistance = dist
+				suggestions = []string{dbWord} // New best match found, reset suggestions
+			} else if dist == bestDistance {
+				suggestions = append(suggestions, dbWord)
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return suggestions, nil
+}
+
+// abs returns the absolute value of an integer.
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 // putCore performs the actual put operation for a serialized value within an existing transaction.
