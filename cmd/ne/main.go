@@ -31,6 +31,7 @@ func main() {
 	var verboseFlag bool
 	var jsonFlag bool
 	var fullOutputFlag bool
+	var debugFlag bool
 
 	cmd := &cli.Command{
 		Name:      "ne",
@@ -54,6 +55,11 @@ func main() {
 				Aliases:     []string{"f"},
 				Usage:       "Show full map output in plain text (if not JSON)",
 				Destination: &fullOutputFlag,
+			},
+			&cli.BoolFlag{
+				Name:        "debug",
+				Usage:       "Enable fuzzy search debug statistics",
+				Destination: &debugFlag,
 			},
 			&cli.StringFlag{
 				Name:        "dbpath",
@@ -137,16 +143,31 @@ func main() {
 
 			if !found {
 				// Exact match failed, try to find similar words.
-				if !jsonFlag {
+				if !jsonFlag && !debugFlag {
 					fmt.Printf("Term '%s' not found. Searching for similar terms...\n", searchKey)
 				}
 
-				suggestions, err := dbStore.FindSimilar(searchKey, 2) // Max distance of 2
+				var onCheckCallback func(string, int)
+				calculationsCount := 0
+				if debugFlag {
+					onCheckCallback = func(dbWord string, distance int) {
+						calculationsCount++
+						if verboseFlag {
+							logger.Debug("Fuzzy search check", zap.String("dbWord", dbWord), zap.Int("distance", distance))
+						}
+					}
+				}
+
+				suggestions, err := dbStore.FindSimilar(searchKey, 2, onCheckCallback) // Max distance of 2
 				if err != nil {
 					// Handle error from FindSimilar itself
 					logger.Error("Fuzzy search failed", zap.Error(err))
 					fmt.Fprintf(os.Stderr, "Error during fuzzy search: %v\n", err)
 					return err
+				}
+
+				if debugFlag {
+					fmt.Printf("[Debug] Fuzzy search performed %d distance calculations.\n", calculationsCount)
 				}
 
 				if len(suggestions) == 0 {

@@ -155,7 +155,8 @@ func (s *DBStore) Get(key string) (map[string]string, bool, error) {
 
 // FindSimilar searches for words with a similar spelling to the input word.
 // It uses the Levenshtein distance to measure similarity and includes performance optimizations.
-func (s *DBStore) FindSimilar(word string, maxDistance int) ([]string, error) {
+// The onCheck callback can be used for debugging to inspect every word that is checked.
+func (s *DBStore) FindSimilar(word string, maxDistance int, onCheck func(dbWord string, distance int)) ([]string, error) {
 	var suggestions []string
 	bestDistance := maxDistance
 
@@ -178,6 +179,10 @@ func (s *DBStore) FindSimilar(word string, maxDistance int) ([]string, error) {
 			}
 
 			dist := levenshtein.ComputeDistance(word, dbWord)
+
+			if onCheck != nil {
+				onCheck(dbWord, dist)
+			}
 
 			if dist < bestDistance {
 				bestDistance = dist

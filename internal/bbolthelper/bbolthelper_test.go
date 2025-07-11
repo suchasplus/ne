@@ -339,7 +339,7 @@ func TestDBStore_FindSimilar(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := store.FindSimilar(tt.inputWord, tt.maxDistance)
+			got, err := store.FindSimilar(tt.inputWord, tt.maxDistance, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("FindSimilar() error = %v, wantErr %v", err, tt.wantErr)
 				return
