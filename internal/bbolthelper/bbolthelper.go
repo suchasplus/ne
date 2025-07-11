@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strconv"
 
+	"github.com/agnivade/levenshtein"
 	bolt "go.etcd.io/bbolt"
 	"go.uber.org/zap"
-	"github.com/agnivade/levenshtein"
 )
 
 const (
@@ -155,10 +157,19 @@ func (s *DBStore) Get(key string) (map[string]string, bool, error) {
 
 // FindSimilar searches for words with a similar spelling to the input word.
 // It uses the Levenshtein distance to measure similarity and includes performance optimizations.
-// The onCheck callback can be used for debugging to inspect every word that is checked.
-func (s *DBStore) FindSimilar(word string, maxDistance int, onCheck func(dbWord string, distance int)) ([]string, error) {
-	var suggestions []string
-	bestDistance := maxDistance
+// The logic is as follows:
+// 1. Find all words with a Levenshtein distance of 1.
+// 2. Stop searching if more than 10 suggestions are found.
+// 3. Sort suggestions: primarily by frequency (desc), secondarily by length (desc).
+// 4. If more than 3 suggestions are found, return the top 3. Otherwise, return all.
+func (s *DBStore) FindSimilar(word string, maxDistance int) ([]string, error) {
+	// suggestion struct holds data for sorting candidates.
+	type suggestion struct {
+		word string
+		freq int
+		len  int
+	}
+	var suggestions []suggestion
 
 	err := s.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(s.bucketName))
@@ -169,26 +180,38 @@ func (s *DBStore) FindSimilar(word string, maxDistance int, onCheck func(dbWord 
 		c := b.Cursor()
 		inputLen := len(word)
 
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			// Stop searching if we have enough candidates.
+			if len(suggestions) > 10 {
+				break
+			}
+
 			dbWord := string(k)
 
-			// Length pruning: if the length difference is greater than the best distance,
+			// Length pruning: if the length difference is greater than the max distance,
 			// the Levenshtein distance must also be greater.
-			if abs(len(dbWord)-inputLen) > bestDistance {
+			if abs(len(dbWord)-inputLen) > maxDistance {
 				continue
 			}
 
 			dist := levenshtein.ComputeDistance(word, dbWord)
 
-			if onCheck != nil {
-				onCheck(dbWord, dist)
-			}
+			if dist > 0 && dist <= maxDistance {
+				// Deserialize to get frequency.
+				valueMap, err := Deserialize(v)
+				if err != nil {
+					s.logger.Warn("Failed to deserialize value for suggestion, skipping.", zap.String("word", dbWord), zap.Error(err))
+					continue
+				}
 
-			if dist < bestDistance {
-				bestDistance = dist
-				suggestions = []string{dbWord} // New best match found, reset suggestions
-			} else if dist == bestDistance {
-				suggestions = append(suggestions, dbWord)
+				freqStr, _ := valueMap["frq"]
+				freq, _ := strconv.Atoi(freqStr) // Atoi returns 0 on error, which is acceptable here.
+
+				suggestions = append(suggestions, suggestion{
+					word: dbWord,
+					freq: freq,
+					len:  len(dbWord),
+				})
 			}
 		}
 		return nil
@@ -198,7 +221,26 @@ func (s *DBStore) FindSimilar(word string, maxDistance int, onCheck func(dbWord 
 		return nil, err
 	}
 
-	return suggestions, nil
+	// Sort the suggestions.
+	sort.Slice(suggestions, func(i, j int) bool {
+		if suggestions[i].freq != suggestions[j].freq {
+			return suggestions[i].freq < suggestions[j].freq // Lower frq value first (higher frequency)
+		}
+		return suggestions[i].len > suggestions[j].len // Longer word first for ties
+	})
+
+	// Limit the number of results.
+	if len(suggestions) > 3 {
+		suggestions = suggestions[:3]
+	}
+
+	// Extract just the words to return.
+	resultWords := make([]string, len(suggestions))
+	for i, sug := range suggestions {
+		resultWords[i] = sug.word
+	}
+
+	return resultWords, nil
 }
 
 // abs returns the absolute value of an integer.

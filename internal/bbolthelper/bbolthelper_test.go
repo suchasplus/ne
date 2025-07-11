@@ -262,95 +262,109 @@ func TestDBStore_FindSimilar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDBStore() failed: %v", err)
 	}
+	defer store.Close()
 
-	// Populate with test data
-	testWords := []string{"develop", "development", "developer", "test", "testing", "apple", "apply"}
-	for _, word := range testWords {
-		if err := store.Put(word, map[string]string{"def": "a " + word}); err != nil {
-			store.Close()
-			t.Fatalf("Failed to put test word '%s': %v", word, err)
+	// Populate with test data including frequency and length variations.
+	testData := []struct {
+		word string
+		freq string
+	}{
+		{"develop", "100"},      // len 7
+		{"development", "80"},   // len 11
+		{"developer", "90"},     // len 9
+		{"devel", "70"},         // len 5, freq lower than develop
+		{"test", "200"},
+		{"testing", "150"},
+		{"apple", "300"},
+		{"apply", "250"},
+		// For testing tie-breaking and limits
+		{"cat", "50"},
+		{"bat", "50"},
+		{"rat", "50"},
+		{"mat", "50"},
+	}
+	for _, item := range testData {
+		if err := store.Put(item.word, map[string]string{"frq": item.freq}); err != nil {
+			t.Fatalf("Failed to put test word '%s': %v", item.word, err)
 		}
 	}
 
 	tests := []struct {
-		name          string
-		inputWord     string
-		maxDistance   int
-		want          []string
-		wantErr       bool
+		name        string
+		inputWord   string
+		maxDistance int
+		want        []string
+		wantErr     bool
 	}{
 		{
-			name:        "finds single char insertion",
-			inputWord:   "devlop",
+			name:        "finds substitution, frq/len sort",
+			inputWord:   "develp", // dist 1 to develop, devel
 			maxDistance: 1,
-			want:        []string{"develop"},
-			wantErr:     false,
-		},
-		{
-			name:        "finds single char substitution",
-			inputWord:   "devrlop",
-			maxDistance: 1,
-			want:        []string{"develop"},
-			wantErr:     false,
+			// "devel" (70) < "develop" (100), so "devel" comes first.
+			want:    []string{"devel", "develop"},
+			wantErr: false,
 		},
 		{
 			name:        "finds single char deletion",
-			inputWord:   "deveoper",
+			inputWord:   "deveoper", // dist 1 to developer
 			maxDistance: 1,
 			want:        []string{"developer"},
-			wantErr:     false,
-		},
-		{
-			name:        "finds multiple candidates with same distance",
-			inputWord:   "tes",
-			maxDistance: 1,
-			want:        []string{"test"}, // "testing" is distance 4
-			wantErr:     false,
-		},
-		{
-			name:        "finds with larger distance",
-			inputWord:   "deveopment",
-			maxDistance: 2,
-			want:        []string{"development"},
 			wantErr:     false,
 		},
 		{
 			name:        "no match found within distance",
 			inputWord:   "xyz",
 			maxDistance: 1,
-			want:        []string(nil), // Expect nil or empty slice
+			want:        []string{}, // Expect empty slice
 			wantErr:     false,
 		},
 		{
-			name:        "exact match is not a similar match (distance 0)",
+			name:        "exact match is distance 0, should not be returned",
 			inputWord:   "apple",
-			maxDistance: 0,
-			want:        []string{"apple"},
+			maxDistance: 1,
+			want:        []string{"apply"}, // "apply" is dist 1, "apple" (dist 0) is excluded
 			wantErr:     false,
 		},
 		{
-			name:        "dynamic threshold adjustment test",
-			inputWord:   "aply",
-			maxDistance: 2, // "apply" is dist 1, "apple" is dist 2. Should only return "apply".
-			want:        []string{"apply"},
-			wantErr:     false,
+			name:        "more than 3 results, should be truncated to top 3",
+			inputWord:   "dat", // dist 1 to cat, bat, rat, mat
+			maxDistance: 1,
+			// All have same freq (50) and len (3), so order is not guaranteed.
+			// We just check that we get 3 results.
+			want:    []string{"cat", "bat", "rat"}, // Order might vary, will check length
+			wantErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := store.FindSimilar(tt.inputWord, tt.maxDistance, nil)
+			got, err := store.FindSimilar(tt.inputWord, tt.maxDistance)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("FindSimilar() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			// Use a simple sort for comparison to handle order differences, though the current implementation is deterministic.
-			// sort.Strings(got)
-			// sort.Strings(tt.want)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("FindSimilar() got = %v, want %v", got, tt.want)
+
+			// For the case with more than 3 results, we only check the length
+			// because the order of items with identical sort keys is not guaranteed.
+			if tt.name == "more than 3 results, should be truncated to top 3" {
+				if len(got) != 3 {
+					t.Errorf("FindSimilar() for '%s' got %d results, want 3", tt.inputWord, len(got))
+				}
+				// Create a map for quick lookups
+				wantMap := make(map[string]bool)
+				for _, w := range []string{"cat", "bat", "rat", "mat"} {
+					wantMap[w] = true
+				}
+				for _, g := range got {
+					if !wantMap[g] {
+						t.Errorf("FindSimilar() got unexpected word '%s'", g)
+					}
+				}
+			} else {
+				if !reflect.DeepEqual(got, tt.want) {
+					t.Errorf("FindSimilar() got = %v, want %v", got, tt.want)
+				}
 			}
 		})
 	}
-	store.Close()
 }

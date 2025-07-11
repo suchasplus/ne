@@ -143,31 +143,17 @@ func main() {
 
 			if !found {
 				// Exact match failed, try to find similar words.
-				if !jsonFlag && !debugFlag {
+				if !jsonFlag {
 					fmt.Printf("Term '%s' not found. Searching for similar terms...\n", searchKey)
 				}
 
-				var onCheckCallback func(string, int)
-				calculationsCount := 0
-				if debugFlag {
-					onCheckCallback = func(dbWord string, distance int) {
-						calculationsCount++
-						if verboseFlag {
-							logger.Debug("Fuzzy search check", zap.String("dbWord", dbWord), zap.Int("distance", distance))
-						}
-					}
-				}
-
-				suggestions, err := dbStore.FindSimilar(searchKey, 2, onCheckCallback) // Max distance of 2
+				// With the new logic, we only care about distance 1 and the callback is no longer needed.
+				suggestions, err := dbStore.FindSimilar(searchKey, 1)
 				if err != nil {
 					// Handle error from FindSimilar itself
 					logger.Error("Fuzzy search failed", zap.Error(err))
 					fmt.Fprintf(os.Stderr, "Error during fuzzy search: %v\n", err)
 					return err
-				}
-
-				if debugFlag {
-					fmt.Printf("[Debug] Fuzzy search performed %d distance calculations.\n", calculationsCount)
 				}
 
 				if len(suggestions) == 0 {
@@ -182,7 +168,23 @@ func main() {
 					return nil
 				}
 
-				// We have suggestions, take the first one as the best match.
+				// If we have multiple suggestions, list them and exit.
+				if len(suggestions) > 1 {
+					if jsonFlag {
+						// For JSON, we can just list the suggestions.
+						jsonResult := JsonResult{Term: searchKey, Data: map[string]string{"suggestions": strings.Join(suggestions, ", ")}}
+						jsonValue, _ := json.MarshalIndent(jsonResult, "", "  ")
+						fmt.Println(string(jsonValue))
+					} else {
+						fmt.Println("Did you mean one of these?")
+						for _, s := range suggestions {
+							fmt.Printf(" - %s\n", s)
+						}
+					}
+					return nil
+				}
+
+				// If we have exactly one suggestion, proceed with it.
 				bestMatch := suggestions[0]
 				if !jsonFlag {
 					fmt.Printf("Did you mean '%s'?\n\n", bestMatch)
