@@ -82,13 +82,20 @@ The `kvbuilder` will automatically run a compaction operation upon completion.
 
 The `ne` tool takes the search term directly as an argument.
 
+**Usage:** `./ne [global options] <term>`
+
+**Example:**
 ```bash
 # Look up a word using the 'ne' tool
-./ne <term>
-
-# Example
 ./ne hello
 ```
+
+**Global Options:**
+-   `--verbose`, `-v`: Enable verbose logging output.
+-   `--json`, `-j`, `-q`: Output result as JSON.
+-   `--full`, `-f`: Show full map output in plain text (if not JSON).
+-   `--dbpath string`, `-d string`: Path to the bbolt database file.
+-   `--bucket string`, `-b string`: Name of the bucket within the database.
 
 ### 5. Running Tests
 
