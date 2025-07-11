@@ -1,0 +1,46 @@
+# Local environment variables
+.env
+.env.local
+
+# Compiled Go binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+
+# Coverage profiling files
+coverage.out
+coverage.txt
+coverage.html
+profile.out
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Vendored dependencies
+vendor/
+
+# OS-generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE/Editor configuration
+.idea/
+.vscode/
+*.swp
+*~
+
+# Project-specific binaries
+# Based on the cmd directory
+ne
+kvbuilder
