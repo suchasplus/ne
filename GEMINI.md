@@ -8,7 +8,7 @@ This file provides context for the Gemini AI assistant to understand the `ne` pr
 
 The core functionalities are split between two binaries:
 1.  **`kvbuilder`**: A tool to create or update the BoltDB database from a large CSV file (`ecdict.csv`). It also compacts the database for optimal size.
-2.  **`ne`**: The main CLI tool to query the database for a word and display its definition, translation, phonetic transcription, and other details in a formatted table.
+2.  **`ne`**: The main CLI tool to query the database for a word and display its definition, translation, and other details in a formatted table.
 
 ## Tech Stack
 
@@ -17,14 +17,13 @@ The core functionalities are split between two binaries:
 -   **CLI Framework**: `github.com/urfave/cli/v3`
 -   **Logging**: `go.uber.org/zap`
 -   **UI/Output Formatting**:
-    -   `github.com/olekukonko/tablewriter` for creating formatted tables in the terminal.
-    -   `github.com/charmbracelet/lipgloss` for styled/colored terminal output.
+    -   `github.com/charmbracelet/lipgloss/table` for creating formatted tables in the terminal.
 
 ## Project Structure
 
 ```
 .
-├─�� assets/
+├── assets/
 │   ├── ecdict.csv.xz   # The compressed dictionary data source. MUST be decompressed before use.
 │   └── README.md       # Instructions on how to decompress the data file.
 ├── cmd/
@@ -35,8 +34,8 @@ The core functionalities are split between two binaries:
 ```
 
 -   **`cmd/kvbuilder/main.go`**: The entry point for the database builder tool.
--   **`cmd/ne/main.go`**: The main entry point for the dictionary lookup application.
--   **`internal/bbolthelper/bbolthelper.go`**: Contains the `DBStore` struct and all logic for interacting with the BoltDB database. This includes serializing/deserializing data with `encoding/gob`.
+-   **`cmd/ne/main.go`**: The main entry point for the dictionary lookup application. It takes the search term as a direct argument.
+-   **`internal/bbolthelper/bbolthelper.go`**: Contains the `DBStore` struct and all logic for interacting with the BoltDB database.
 -   **`assets/ecdict.csv.xz`**: The primary data source. It is compressed with `xz`.
 
 ## Development Workflow
@@ -81,12 +80,14 @@ The `kvbuilder` will automatically run a compaction operation upon completion.
 
 ### 4. Running the Application (Looking up words)
 
+The `ne` tool takes the search term directly as an argument.
+
 ```bash
 # Look up a word using the 'ne' tool
-./ne lookup <word>
+./ne <term>
 
 # Example
-./ne lookup hello
+./ne hello
 ```
 
 ### 5. Running Tests
