@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.2'
+
+      - name: Build binaries
+        run: |
+          # Build ne binary for Darwin
+          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o ne-darwin-amd64 ./cmd/ne
+          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o ne-darwin-arm64 ./cmd/ne
+          
+          # Build ne binary for Linux
+          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ne-linux-amd64 ./cmd/ne
+          GOOS=linux GOARCH=386 go build -ldflags="-s -w" -o ne-linux-386 ./cmd/ne
+          GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o ne-linux-arm64 ./cmd/ne
+          
+          # Build kvbuilder binary for Darwin
+          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o kvbuilder-darwin-amd64 ./cmd/kvbuilder
+          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o kvbuilder-darwin-arm64 ./cmd/kvbuilder
+          
+          # Build kvbuilder binary for Linux
+          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o kvbuilder-linux-amd64 ./cmd/kvbuilder
+          GOOS=linux GOARCH=386 go build -ldflags="-s -w" -o kvbuilder-linux-386 ./cmd/kvbuilder
+          GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o kvbuilder-linux-arm64 ./cmd/kvbuilder
+          
+          # Create archives for Darwin
+          tar -czf ne-darwin-amd64.tar.gz ne-darwin-amd64
+          tar -czf ne-darwin-arm64.tar.gz ne-darwin-arm64
+          tar -czf kvbuilder-darwin-amd64.tar.gz kvbuilder-darwin-amd64
+          tar -czf kvbuilder-darwin-arm64.tar.gz kvbuilder-darwin-arm64
+          
+          # Create archives for Linux
+          tar -czf ne-linux-amd64.tar.gz ne-linux-amd64
+          tar -czf ne-linux-386.tar.gz ne-linux-386
+          tar -czf ne-linux-arm64.tar.gz ne-linux-arm64
+          tar -czf kvbuilder-linux-amd64.tar.gz kvbuilder-linux-amd64
+          tar -czf kvbuilder-linux-386.tar.gz kvbuilder-linux-386
+          tar -czf kvbuilder-linux-arm64.tar.gz kvbuilder-linux-arm64
+          
+          # Copy dictionary data file
+          cp assets/ecdict.csv.xz .
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: ./RELEASE_TEMPLATE.md
+          files: |
+            ne-darwin-amd64.tar.gz
+            ne-darwin-arm64.tar.gz
+            ne-linux-amd64.tar.gz
+            ne-linux-386.tar.gz
+            ne-linux-arm64.tar.gz
+            kvbuilder-darwin-amd64.tar.gz
+            kvbuilder-darwin-arm64.tar.gz
+            kvbuilder-linux-amd64.tar.gz
+            kvbuilder-linux-386.tar.gz
+            kvbuilder-linux-arm64.tar.gz
+            ecdict.csv.xz
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
