@@ -1,6 +1,8 @@
 # Local environment variables
 .env
 .env.local
+.gemini/
+.claude/
 
 # Compiled Go binaries
 *.exe
