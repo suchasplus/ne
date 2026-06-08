@@ -2,7 +2,7 @@
 
 A blazingly fast command-line dictionary tool powered by Go and BoltDB.
 
-`ne` (stands for "玩转 ENglish" - "Mastering ENglish") provides instant, offline access to a comprehensive English dictionary directly from your terminal.
+`ne` (stands for "玩转 ENglish" - "Mastering ENglish") provides instant, offline access to a comprehensive English-Chinese and Chinese-English dictionary directly from your terminal.
 
 ## Features
 
@@ -11,14 +11,16 @@ A blazingly fast command-line dictionary tool powered by Go and BoltDB.
 -   **Simple & Clean UI**: Results are displayed in a clean, readable table format.
 -   **Flexible Output**: Supports both human-readable tables and structured `JSON` output for scripting.
 -   **Fuzzy Search**: Automatically finds the closest match for common misspellings (e.g., "devlop" -> "develop").
--   **Comprehensive Data**: Uses the extensive [ECDICT](https://github.com/skywind3000/ECDICT) dictionary data.
+-   **Comprehensive Data**: Uses the extensive [ECDICT](https://github.com/skywind3000/ECDICT) dictionary data for English, and [CC-CEDICT](https://www.mdbg.net/chinese/dictionary?page=cc-cedict) for Chinese.
+-   **Bilingual**: Automatically detects whether your query is Chinese or English — no flags needed.
 
 ## Getting Started
 
 ### Prerequisites
 
 -   **Go**: Version 1.24 or newer.
--   **xz**: A command-line tool for decompressing `.xz` files (e.g., `xz-utils` on Debian/Ubuntu, `xz` on macOS via Homebrew).
+-   **xz**: For decompressing `ecdict.csv.xz` (e.g., `xz-utils` on Debian/Ubuntu, `xz` on macOS via Homebrew).
+-   **gunzip**: For decompressing `cedict_1_0_ts_utf-8_mdbg.txt.gz` (usually pre-installed on macOS/Linux).
 
 ### Installation & Setup
 
@@ -29,16 +31,13 @@ A blazingly fast command-line dictionary tool powered by Go and BoltDB.
     ```
 
 2.  **Decompress the Dictionary Data:**
-    The dictionary source file comes compressed. You must decompress it before building the database.
+    Both dictionary source files come compressed. Decompress them before building the databases.
     ```bash
-    # Navigate to the assets directory
-    cd assets
+    # Decompress the English dictionary
+    xz -d assets/ecdict.csv.xz
 
-    # Decompress the file
-    xz -d ecdict.csv.xz
-
-    # Navigate back to the project root
-    cd ..
+    # Decompress the Chinese dictionary
+    gunzip assets/cedict_1_0_ts_utf-8_mdbg.txt.gz
     ```
 
 3.  **Build the Tools:**
@@ -52,13 +51,16 @@ A blazingly fast command-line dictionary tool powered by Go and BoltDB.
     ```
     You can move the `kvbuilder` and `ne` executables to a directory in your `$PATH` (e.g., `/usr/local/bin`) for easy access.
 
-4.  **Build the Database:**
-    Now, use the `kvbuilder` tool to create the local BoltDB database from the CSV file.
+4.  **Build the Databases:**
+    Use `kvbuilder` to create the BoltDB databases from the dictionary files.
     ```bash
-    # This command reads the CSV and creates the database file (ecdict.bbolt)
-    ./kvbuilder --csv assets/ecdict.csv
+    # Build the English dictionary database (ecdict.bbolt)
+    ./kvbuilder --mode ecdict --csv assets/ecdict.csv
+
+    # Build the Chinese dictionary database (cedict.bbolt)
+    ./kvbuilder --mode cedict --csv assets/cedict_1_0_ts_utf-8_mdbg.txt
     ```
-    This process may take a minute. `kvbuilder` will create the `ecdict.bbolt` file in your current directory or in `$HOME/.cache/ne/` if it has permissions.
+    This process may take a minute per database. Both files will be created in `$HOME/.cache/ne/` by default.
 
 ## Usage
 
@@ -72,12 +74,37 @@ To look up a word, simply pass it as an argument to the `ne` command.
 **Options:**
 -   `--json`, `-j`: Output the result in JSON format.
 -   `--full`, `-f`: Show all available data fields for a term.
--   `--dbpath <path>`: Specify a custom path to the `ecdict.bbolt` database file.
+-   `--dbpath <path>`: Specify a custom path to the `ecdict.bbolt` (English) database file.
+-   `--cjkdbpath <path>`: Specify a custom path to the `cedict.bbolt` (Chinese) database file.
 -   `--verbose`, `-v`: Enable detailed logging.
+
+**Language Detection:**
+`ne` automatically detects whether your query contains Chinese characters (CJK Unicode) and routes to the appropriate database. No flags needed.
 
 ## Examples
 
-### Standard Lookup
+### Chinese Lookup
+
+Query with any Chinese characters (simplified or traditional) to get pinyin and English definitions.
+
+```bash
+$ ./ne 中文
+
+┌───────────────┬────────────────────────────────────────────────────────────┐
+│ term          │ 中文                                                        │
+├───────────────┼────────────────────────────────────────────────────────────┤
+│ pinyin        │ Zhong1 wen2                                                │
+├───────────────┼────────────────────────────────────────────────────────────┤
+│ definitions   │ Chinese language                                           │
+└───────────────┴────────────────────────────────────────────────────────────┘
+```
+
+Traditional characters also work:
+```bash
+$ ./ne 漢字
+```
+
+### English Standard Lookup
 
 A standard lookup displays the most common fields in a clean table.
 

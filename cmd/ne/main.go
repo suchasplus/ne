@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
@@ -23,10 +24,21 @@ type JsonResult struct {
 	Error string            `json:"error,omitempty"`
 }
 
+// isChineseQuery returns true if the term contains any CJK Unicode character.
+func isChineseQuery(term string) bool {
+	for _, r := range term {
+		if unicode.Is(unicode.Han, r) {
+			return true
+		}
+	}
+	return false
+}
+
 func main() {
 	// Logger will be initialized based on the verbose flag inside the Action func
 
 	var dbPathFlag string
+	var cjkDBPathFlag string
 	var bucketNameFlag string
 	var verboseFlag bool
 	var jsonFlag bool
@@ -68,6 +80,11 @@ func main() {
 				Destination: &dbPathFlag,
 			},
 			&cli.StringFlag{
+				Name:        "cjkdbpath",
+				Usage:       fmt.Sprintf("Path to the CC-CEDICT bbolt database file. If not set, searches in PATH, then $HOME/.cache/ne/%s", bbolthelper.DefaultCedictDBPath),
+				Destination: &cjkDBPathFlag,
+			},
+			&cli.StringFlag{
 				Name:        "bucket",
 				Aliases:     []string{"b"},
 				Usage:       fmt.Sprintf("Name of the bucket within the bbolt database. Defaults to '%s'", bbolthelper.DefaultBucketName),
@@ -89,213 +106,245 @@ func main() {
 			}
 			searchKey := strings.ToLower(cCtx.Args().First())
 
-			actualDBPath := dbPathFlag
-			if actualDBPath == "" {
-				resolvedPath, err := resolveDefaultDBPathForNe(bbolthelper.DefaultDBPath)
-				if err != nil {
-					logger.Error("Failed to find database file", zap.Error(err))
-					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-					return err // Or cli.Exit for cleaner exit code handling
-				}
-				actualDBPath = resolvedPath
-				logger.Info("Using resolved database path", zap.String("path", actualDBPath))
+			if isChineseQuery(searchKey) {
+				return runChineseQuery(searchKey, cjkDBPathFlag, jsonFlag, fullOutputFlag, logger)
 			}
-
-			actualBucketName := bucketNameFlag
-			if actualBucketName == "" {
-				actualBucketName = bbolthelper.DefaultBucketName
-			}
-
-			logger.Info("Attempting to read key from bbolt database",
-				zap.String("key", searchKey),
-				zap.String("dbPath", actualDBPath),
-				zap.String("bucketName", actualBucketName),
-			)
-
-			storeConfig := bbolthelper.Config{
-				DBPath:     actualDBPath,
-				BucketName: actualBucketName,
-				FileMode:   bbolthelper.DefaultDBFileMode, // Ensure correct file mode
-				ReadOnly:   true,
-				Logger:     logger,
-			}
-			dbStore, err := bbolthelper.NewDBStore(storeConfig)
-			if err != nil {
-				logger.Error("Failed to open database store", zap.Error(err))
-				fmt.Fprintf(os.Stderr, "Error opening database: %v\n", err)
-				return err
-			}
-			defer dbStore.Close()
-
-			valueMap, found, err := dbStore.Get(searchKey)
-			if err != nil {
-				msg := "Error retrieving key"
-				if jsonFlag {
-					jsonResult := JsonResult{Term: searchKey, Error: fmt.Sprintf("%s: %v", msg, err)}
-					jsonValue, _ := json.Marshal(jsonResult)
-					fmt.Println(string(jsonValue))
-				} else {
-					fmt.Printf("%s '%s': %v\n", msg, searchKey, err)
-				}
-				logger.Error(msg, zap.String("key", searchKey), zap.Error(err))
-				return err
-			}
-
-			if !found {
-				// Exact match failed, try to find similar words.
-				if !jsonFlag {
-					fmt.Printf("Term '%s' not found. Searching for similar terms...\n", searchKey)
-				}
-
-				// With the new logic, we only care about distance 1 and the callback is no longer needed.
-				suggestions, err := dbStore.FindSimilar(searchKey, 1)
-				if err != nil {
-					// Handle error from FindSimilar itself
-					logger.Error("Fuzzy search failed", zap.Error(err))
-					fmt.Fprintf(os.Stderr, "Error during fuzzy search: %v\n", err)
-					return err
-				}
-
-				if len(suggestions) == 0 {
-					msg := "term not found"
-					if jsonFlag {
-						jsonResult := JsonResult{Term: searchKey, Error: msg}
-						jsonValue, _ := json.Marshal(jsonResult)
-						fmt.Println(string(jsonValue))
-					} else {
-						fmt.Printf("No similar terms found for '%s'.\n", searchKey)
-					}
-					return nil
-				}
-
-				// If we have multiple suggestions, list them and exit.
-				if len(suggestions) > 1 {
-					if jsonFlag {
-						// For JSON, we can just list the suggestions.
-						jsonResult := JsonResult{Term: searchKey, Data: map[string]string{"suggestions": strings.Join(suggestions, ", ")}}
-						jsonValue, _ := json.MarshalIndent(jsonResult, "", "  ")
-						fmt.Println(string(jsonValue))
-					} else {
-						fmt.Println("Did you mean one of these?")
-						for _, s := range suggestions {
-							fmt.Printf(" - %s\n", s)
-						}
-					}
-					return nil
-				}
-
-				// If we have exactly one suggestion, proceed with it.
-				bestMatch := suggestions[0]
-				if !jsonFlag {
-					fmt.Printf("Did you mean '%s'?\n\n", bestMatch)
-				}
-
-				// Perform a lookup for the best match.
-				valueMap, found, err = dbStore.Get(bestMatch)
-				if err != nil || !found {
-					// This should be rare if FindSimilar returned it, but handle it.
-					msg := "could not retrieve suggestion"
-					if jsonFlag {
-						jsonResult := JsonResult{Term: bestMatch, Error: msg}
-						jsonValue, _ := json.Marshal(jsonResult)
-						fmt.Println(string(jsonValue))
-					} else {
-						fmt.Fprintf(os.Stderr, "Error: could not retrieve suggestion '%s'.\n", bestMatch)
-					}
-					return err
-				}
-				// Update searchKey to the one we actually found for display purposes.
-				searchKey = bestMatch
-			}
-
-			if jsonFlag {
-				jsonResult := JsonResult{Term: searchKey, Data: valueMap}
-				jsonValue, jErr := json.MarshalIndent(jsonResult, "", "  ")
-				if jErr != nil {
-					// This error is about JSON marshaling, not finding the key
-					logger.Error("Failed to marshal JSON output", zap.Error(jErr))
-					fmt.Fprintf(os.Stderr, "Error generating JSON: %v\n", jErr)
-					return jErr
-				}
-				fmt.Println(string(jsonValue))
-			} else {
-				// 2-column table output using lipgloss/table
-				const keyColumnWidth = 15
-				const valueColumnWidth = 60 // Adjusted for table borders/padding
-
-				t := table.New().
-					BorderBottom(true).
-					BorderRow(true).
-					Width(keyColumnWidth + valueColumnWidth + 3). // Total width approx
-					Border(lipgloss.NormalBorder()).              // Use double-line border
-					StyleFunc(func(row, col int) lipgloss.Style {
-						// Basic padding for cells
-						style := lipgloss.NewStyle().Padding(0, 1)
-						// The table's Border will handle line drawing.
-						// We can apply specific styles for headers or other special cells if needed.
-						if col == 0 { // Key column
-							return style.Width(keyColumnWidth)
-						}
-						return style.Width(valueColumnWidth) // Value column
-					})
-
-				var rowsData [][]string
-				// Prepare data for table
-				rowsData = append(rowsData, []string{"term", searchKey})
-
-				displayFields := []string{"translation", "definition", "exchange"}
-				if fullOutputFlag {
-					// Collect all keys from valueMap and sort them for consistent order
-					allKeys := make([]string, 0, len(valueMap))
-					for k := range valueMap {
-						if k != "term" { // Exclude term if already added, though it's not typically in valueMap here
-							allKeys = append(allKeys, k)
-						}
-					}
-					sort.Strings(allKeys) // Sort for consistent output
-					displayFields = allKeys
-				}
-
-				for _, fieldKey := range displayFields {
-					if val, ok := valueMap[fieldKey]; ok {
-						processedVal := strings.ReplaceAll(val, "\\n", "\n")
-						processedVal = strings.ReplaceAll(processedVal, "\\r", "\r") // Ensure \r is also processed
-						processedVal = strings.ReplaceAll(processedVal, "\\t", "\t")
-						// Only add to rowsData if the processed value is not empty after trimming whitespace
-						if strings.TrimSpace(processedVal) != "" {
-							rowsData = append(rowsData, []string{fieldKey, processedVal})
-						}
-					}
-				}
-
-				t.Rows(rowsData...)
-
-				if len(rowsData) > 0 {
-					fmt.Println(t.Render())
-				} else {
-					fmt.Println("No data to display for term after filtering.")
-				}
-			}
-			return nil
+			return runEnglishQuery(searchKey, dbPathFlag, bucketNameFlag, jsonFlag, fullOutputFlag, logger)
 		},
 	}
 
 	if err := cmd.Run(context.Background(), os.Args); err != nil {
-		// The logger might not be initialized if error occurs before Action
-		// or if the error is from cli parsing itself.
 		fmt.Fprintf(os.Stderr, "Error running command: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-// resolveDefaultDBPathForNe searches for the database file in standard locations.
-func resolveDefaultDBPathForNe(dbName string) (string, error) {
+// runEnglishQuery handles English word lookup against ecdict.bbolt.
+func runEnglishQuery(searchKey, dbPathFlag, bucketNameFlag string, jsonFlag, fullOutputFlag bool, logger *zap.Logger) error {
+	actualDBPath := dbPathFlag
+	if actualDBPath == "" {
+		resolvedPath, err := resolveDefaultDBPath(bbolthelper.DefaultDBPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return err
+		}
+		actualDBPath = resolvedPath
+		logger.Info("Using resolved database path", zap.String("path", actualDBPath))
+	}
+
+	actualBucketName := bucketNameFlag
+	if actualBucketName == "" {
+		actualBucketName = bbolthelper.DefaultBucketName
+	}
+
+	dbStore, err := bbolthelper.NewDBStore(bbolthelper.Config{
+		DBPath:     actualDBPath,
+		BucketName: actualBucketName,
+		FileMode:   bbolthelper.DefaultDBFileMode,
+		ReadOnly:   true,
+		Logger:     logger,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening database: %v\n", err)
+		return err
+	}
+	defer dbStore.Close()
+
+	valueMap, found, err := dbStore.Get(searchKey)
+	if err != nil {
+		return outputError(searchKey, fmt.Sprintf("Error retrieving key: %v", err), jsonFlag)
+	}
+
+	if !found {
+		if !jsonFlag {
+			fmt.Printf("Term '%s' not found. Searching for similar terms...\n", searchKey)
+		}
+
+		suggestions, err := dbStore.FindSimilar(searchKey, 1)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error during fuzzy search: %v\n", err)
+			return err
+		}
+
+		if len(suggestions) == 0 {
+			return outputError(searchKey, "term not found", jsonFlag)
+		}
+
+		if len(suggestions) > 1 {
+			if jsonFlag {
+				jsonResult := JsonResult{Term: searchKey, Data: map[string]string{"suggestions": strings.Join(suggestions, ", ")}}
+				jsonValue, _ := json.MarshalIndent(jsonResult, "", "  ")
+				fmt.Println(string(jsonValue))
+			} else {
+				fmt.Println("Did you mean one of these?")
+				for _, s := range suggestions {
+					fmt.Printf(" - %s\n", s)
+				}
+			}
+			return nil
+		}
+
+		bestMatch := suggestions[0]
+		if !jsonFlag {
+			fmt.Printf("Did you mean '%s'?\n\n", bestMatch)
+		}
+		valueMap, found, err = dbStore.Get(bestMatch)
+		if err != nil || !found {
+			return outputError(bestMatch, "could not retrieve suggestion", jsonFlag)
+		}
+		searchKey = bestMatch
+	}
+
+	if jsonFlag {
+		return printJSON(searchKey, valueMap)
+	}
+
+	displayFields := []string{"translation", "definition", "exchange"}
+	if fullOutputFlag {
+		allKeys := make([]string, 0, len(valueMap))
+		for k := range valueMap {
+			allKeys = append(allKeys, k)
+		}
+		sort.Strings(allKeys)
+		displayFields = allKeys
+	}
+	printTable(searchKey, valueMap, displayFields)
+	return nil
+}
+
+// runChineseQuery handles Chinese word lookup against cedict.bbolt.
+func runChineseQuery(searchKey, cjkDBPathFlag string, jsonFlag, fullOutputFlag bool, logger *zap.Logger) error {
+	actualDBPath := cjkDBPathFlag
+	if actualDBPath == "" {
+		resolvedPath, err := resolveDefaultDBPath(bbolthelper.DefaultCedictDBPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return err
+		}
+		actualDBPath = resolvedPath
+		logger.Info("Using resolved cedict database path", zap.String("path", actualDBPath))
+	}
+
+	dbStore, err := bbolthelper.NewDBStore(bbolthelper.Config{
+		DBPath:     actualDBPath,
+		BucketName: bbolthelper.DefaultCedictBucketName,
+		FileMode:   bbolthelper.DefaultDBFileMode,
+		ReadOnly:   true,
+		Logger:     logger,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening cedict database: %v\n", err)
+		return err
+	}
+	defer dbStore.Close()
+
+	valueMap, found, err := dbStore.Get(searchKey)
+	if err != nil {
+		return outputError(searchKey, fmt.Sprintf("Error retrieving key: %v", err), jsonFlag)
+	}
+
+	if !found {
+		msg := fmt.Sprintf("Term '%s' not found in Chinese dictionary.", searchKey)
+		if jsonFlag {
+			return outputError(searchKey, "term not found", jsonFlag)
+		}
+		fmt.Println(msg)
+		return nil
+	}
+
+	if jsonFlag {
+		return printJSON(searchKey, valueMap)
+	}
+
+	// For Chinese results, show traditional only if different from simplified
+	displayFields := []string{"pinyin", "definitions"}
+	if fullOutputFlag {
+		displayFields = []string{"traditional", "simplified", "pinyin", "definitions"}
+	} else {
+		if t, ok := valueMap["traditional"]; ok && t != valueMap["simplified"] {
+			displayFields = append([]string{"traditional"}, displayFields...)
+		}
+	}
+	printTable(searchKey, valueMap, displayFields)
+	return nil
+}
+
+// outputError prints an error in json or plain text format.
+func outputError(term, msg string, jsonFlag bool) error {
+	if jsonFlag {
+		jsonResult := JsonResult{Term: term, Error: msg}
+		jsonValue, _ := json.Marshal(jsonResult)
+		fmt.Println(string(jsonValue))
+	} else {
+		fmt.Printf("%s\n", msg)
+	}
+	return nil
+}
+
+// printJSON marshals and prints the result as indented JSON.
+func printJSON(term string, valueMap map[string]string) error {
+	jsonResult := JsonResult{Term: term, Data: valueMap}
+	jsonValue, jErr := json.MarshalIndent(jsonResult, "", "  ")
+	if jErr != nil {
+		fmt.Fprintf(os.Stderr, "Error generating JSON: %v\n", jErr)
+		return jErr
+	}
+	fmt.Println(string(jsonValue))
+	return nil
+}
+
+// printTable renders a 2-column lipgloss table for the given fields.
+func printTable(term string, valueMap map[string]string, displayFields []string) {
+	const keyColumnWidth = 15
+	const valueColumnWidth = 60
+
+	t := table.New().
+		BorderBottom(true).
+		BorderRow(true).
+		Width(keyColumnWidth + valueColumnWidth + 3).
+		Border(lipgloss.NormalBorder()).
+		StyleFunc(func(row, col int) lipgloss.Style {
+			style := lipgloss.NewStyle().Padding(0, 1)
+			if col == 0 {
+				return style.Width(keyColumnWidth)
+			}
+			return style.Width(valueColumnWidth)
+		})
+
+	var rowsData [][]string
+	rowsData = append(rowsData, []string{"term", term})
+
+	for _, fieldKey := range displayFields {
+		if val, ok := valueMap[fieldKey]; ok {
+			processedVal := strings.ReplaceAll(val, "\\n", "\n")
+			processedVal = strings.ReplaceAll(processedVal, "\\r", "\r")
+			processedVal = strings.ReplaceAll(processedVal, "\\t", "\t")
+			// For definitions field, replace "/" separators with newlines for readability
+			if fieldKey == "definitions" {
+				processedVal = strings.ReplaceAll(processedVal, "/", "\n")
+			}
+			if strings.TrimSpace(processedVal) != "" {
+				rowsData = append(rowsData, []string{fieldKey, processedVal})
+			}
+		}
+	}
+
+	t.Rows(rowsData...)
+	if len(rowsData) > 0 {
+		fmt.Println(t.Render())
+	} else {
+		fmt.Println("No data to display for term after filtering.")
+	}
+}
+
+// resolveDefaultDBPath searches for the database file in standard locations.
+func resolveDefaultDBPath(dbName string) (string, error) {
 	// 1. Check directories in PATH
 	pathEnv := os.Getenv("PATH")
 	for _, dir := range filepath.SplitList(pathEnv) {
 		dbPath := filepath.Join(dir, dbName)
 		if _, err := os.Stat(dbPath); err == nil {
-			return dbPath, nil // Found
+			return dbPath, nil
 		}
 	}
 
@@ -306,7 +355,7 @@ func resolveDefaultDBPathForNe(dbName string) (string, error) {
 	}
 	cachePath := filepath.Join(homeDir, ".cache", "ne", dbName)
 	if _, err := os.Stat(cachePath); err == nil {
-		return cachePath, nil // Found
+		return cachePath, nil
 	}
 
 	return "", fmt.Errorf("'%s' not found in PATH directories or in %s", dbName, filepath.Join("$HOME", ".cache", "ne"))

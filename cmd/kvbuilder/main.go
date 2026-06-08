@@ -16,6 +16,8 @@ const (
 	defaultCsvDir  = "./assets"
 	defaultCsvFile = "ecdict.csv"
 
+	defaultCedictFile = "cedict_1_0_ts_utf-8_mdbg.txt"
+
 	progressReportInterval = 50000
 )
 
@@ -26,6 +28,7 @@ func main() {
 	var csvPathFlag string
 	var dbPathFlag string
 	var bucketNameFlag string
+	var modeFlag string
 
 	cmd := &cli.Command{
 		Name:  "kvbuilder-importer",
@@ -49,84 +52,21 @@ func main() {
 				Usage:       fmt.Sprintf("Name of the bucket within the bbolt database. Defaults to '%s'", bbolthelper.DefaultBucketName),
 				Destination: &bucketNameFlag,
 			},
+			&cli.StringFlag{
+				Name:        "mode",
+				Aliases:     []string{"m"},
+				Usage:       "Import mode: 'ecdict' (English, default) or 'cedict' (Chinese CC-CEDICT)",
+				Value:       "ecdict",
+				Destination: &modeFlag,
+			},
 		},
 		Action: func(ctx context.Context, cCtx *cli.Command) error {
-			// Determine actual CSV path
-			actualCsvPath := csvPathFlag
-			if actualCsvPath == "" {
-				path1 := filepath.Join(defaultCsvDir, defaultCsvFile)
-				if _, err := os.Stat(path1); err == nil {
-					actualCsvPath = path1
-				} else {
-					path2 := defaultCsvFile
-					if _, err := os.Stat(path2); err == nil {
-						actualCsvPath = path2
-					} else {
-						return fmt.Errorf("default CSV file not found in '%s' or current directory, and --csv flag not provided", defaultCsvDir)
-					}
-				}
-			} else {
-				if _, err := os.Stat(actualCsvPath); err != nil {
-					return fmt.Errorf("specified CSV file '%s' not found or not accessible: %w", actualCsvPath, err)
-				}
+			switch modeFlag {
+			case "cedict":
+				return runCedictImport(csvPathFlag, dbPathFlag, bucketNameFlag, logger)
+			default:
+				return runEcdictImport(csvPathFlag, dbPathFlag, bucketNameFlag, logger)
 			}
-			logger.Info("Using CSV file", zap.String("path", actualCsvPath))
-
-			// Determine DB path and bucket name
-			actualDBPath := dbPathFlag
-			if actualDBPath == "" {
-				resolvedPath, err := resolveDefaultDBPathForKvBuilder(bbolthelper.DefaultDBPath, logger)
-				if err != nil {
-					logger.Error("Failed to resolve or prepare default database path", zap.Error(err))
-					fmt.Fprintf(os.Stderr, "Error resolving DB path: %v\n", err)
-					return err
-				}
-				actualDBPath = resolvedPath
-				logger.Info("Using database path", zap.String("path", actualDBPath))
-			}
-
-			actualBucketName := bucketNameFlag
-			if actualBucketName == "" {
-				actualBucketName = bbolthelper.DefaultBucketName
-			}
-
-			logger.Info("Target database settings",
-				zap.String("dbPath", actualDBPath),
-				zap.String("bucketName", actualBucketName),
-			)
-
-			storeConfig := bbolthelper.Config{
-				DBPath:     actualDBPath,
-				BucketName: actualBucketName,
-				Logger:     logger,
-				// FileMode will use DefaultDBFileMode from bbolthelper
-				// ReadOnly will be false by default
-			}
-			store, err := bbolthelper.NewDBStore(storeConfig)
-			if err != nil {
-				return fmt.Errorf("failed to initialize db store: %w", err)
-			}
-
-			// NewDBStore already opens the database, so no explicit store.Open() is needed.
-			defer store.Close() // Ensure DB is closed even if subsequent steps fail
-
-			logger.Info("Starting import process...")
-			recordsProcessed, err := store.ImportFromCSV(actualCsvPath, progressReportInterval)
-			if err != nil {
-				return fmt.Errorf("failed to import data from CSV '%s': %w", actualCsvPath, err)
-			}
-			logger.Info("Import process completed successfully.",
-				zap.Int("recordsProcessed", recordsProcessed),
-				zap.String("outputDB", actualDBPath),
-			)
-
-			logger.Info("Starting database compaction...")
-			if err := store.Compact(bbolthelper.DefaultTempDBPath); err != nil {
-				return fmt.Errorf("failed to compact database: %w", err)
-			}
-			logger.Info("Database compaction completed.")
-			logger.Info("Process completed successfully.")
-			return nil
 		},
 	}
 
@@ -135,6 +75,144 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error running kvbuilder-importer: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// runEcdictImport handles the ecdict CSV import flow.
+func runEcdictImport(csvPathFlag, dbPathFlag, bucketNameFlag string, logger *zap.Logger) error {
+	actualCsvPath := csvPathFlag
+	if actualCsvPath == "" {
+		path1 := filepath.Join(defaultCsvDir, defaultCsvFile)
+		if _, err := os.Stat(path1); err == nil {
+			actualCsvPath = path1
+		} else {
+			path2 := defaultCsvFile
+			if _, err := os.Stat(path2); err == nil {
+				actualCsvPath = path2
+			} else {
+				return fmt.Errorf("default CSV file not found in '%s' or current directory, and --csv flag not provided", defaultCsvDir)
+			}
+		}
+	} else {
+		if _, err := os.Stat(actualCsvPath); err != nil {
+			return fmt.Errorf("specified CSV file '%s' not found or not accessible: %w", actualCsvPath, err)
+		}
+	}
+	logger.Info("Using CSV file", zap.String("path", actualCsvPath))
+
+	actualDBPath := dbPathFlag
+	if actualDBPath == "" {
+		resolvedPath, err := resolveDefaultDBPathForKvBuilder(bbolthelper.DefaultDBPath, logger)
+		if err != nil {
+			return fmt.Errorf("failed to resolve DB path: %w", err)
+		}
+		actualDBPath = resolvedPath
+	}
+
+	actualBucketName := bucketNameFlag
+	if actualBucketName == "" {
+		actualBucketName = bbolthelper.DefaultBucketName
+	}
+
+	logger.Info("Target database settings",
+		zap.String("dbPath", actualDBPath),
+		zap.String("bucketName", actualBucketName),
+	)
+
+	store, err := bbolthelper.NewDBStore(bbolthelper.Config{
+		DBPath:     actualDBPath,
+		BucketName: actualBucketName,
+		Logger:     logger,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to initialize db store: %w", err)
+	}
+	defer store.Close()
+
+	logger.Info("Starting ecdict import process...")
+	recordsProcessed, err := store.ImportFromCSV(actualCsvPath, progressReportInterval)
+	if err != nil {
+		return fmt.Errorf("failed to import data from CSV '%s': %w", actualCsvPath, err)
+	}
+	logger.Info("Import process completed successfully.",
+		zap.Int("recordsProcessed", recordsProcessed),
+		zap.String("outputDB", actualDBPath),
+	)
+
+	logger.Info("Starting database compaction...")
+	if err := store.Compact(bbolthelper.DefaultTempDBPath); err != nil {
+		return fmt.Errorf("failed to compact database: %w", err)
+	}
+	logger.Info("Database compaction completed.")
+	return nil
+}
+
+// runCedictImport handles the CC-CEDICT text file import flow.
+func runCedictImport(csvPathFlag, dbPathFlag, bucketNameFlag string, logger *zap.Logger) error {
+	actualFilePath := csvPathFlag
+	if actualFilePath == "" {
+		path1 := filepath.Join(defaultCsvDir, defaultCedictFile)
+		if _, err := os.Stat(path1); err == nil {
+			actualFilePath = path1
+		} else {
+			path2 := defaultCedictFile
+			if _, err := os.Stat(path2); err == nil {
+				actualFilePath = path2
+			} else {
+				return fmt.Errorf("default CC-CEDICT file not found in '%s' or current directory, and --csv flag not provided", defaultCsvDir)
+			}
+		}
+	} else {
+		if _, err := os.Stat(actualFilePath); err != nil {
+			return fmt.Errorf("specified CC-CEDICT file '%s' not found or not accessible: %w", actualFilePath, err)
+		}
+	}
+	logger.Info("Using CC-CEDICT file", zap.String("path", actualFilePath))
+
+	actualDBPath := dbPathFlag
+	if actualDBPath == "" {
+		resolvedPath, err := resolveDefaultDBPathForKvBuilder(bbolthelper.DefaultCedictDBPath, logger)
+		if err != nil {
+			return fmt.Errorf("failed to resolve cedict DB path: %w", err)
+		}
+		actualDBPath = resolvedPath
+	}
+
+	actualBucketName := bucketNameFlag
+	if actualBucketName == "" {
+		actualBucketName = bbolthelper.DefaultCedictBucketName
+	}
+
+	logger.Info("Target cedict database settings",
+		zap.String("dbPath", actualDBPath),
+		zap.String("bucketName", actualBucketName),
+	)
+
+	store, err := bbolthelper.NewDBStore(bbolthelper.Config{
+		DBPath:     actualDBPath,
+		BucketName: actualBucketName,
+		Logger:     logger,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to initialize cedict db store: %w", err)
+	}
+	defer store.Close()
+
+	logger.Info("Starting CC-CEDICT import process...")
+	recordsProcessed, err := store.ImportFromCEDICT(actualFilePath, progressReportInterval)
+	if err != nil {
+		return fmt.Errorf("failed to import CC-CEDICT data from '%s': %w", actualFilePath, err)
+	}
+	logger.Info("CC-CEDICT import completed successfully.",
+		zap.Int("recordsProcessed", recordsProcessed),
+		zap.String("outputDB", actualDBPath),
+	)
+
+	logger.Info("Starting cedict database compaction...")
+	if err := store.Compact(bbolthelper.DefaultCedictTempDBPath); err != nil {
+		return fmt.Errorf("failed to compact cedict database: %w", err)
+	}
+	logger.Info("Cedict database compaction completed.")
+	return nil
 }
 
 // resolveDefaultDBPathForKvBuilder searches for the database file in PATH first.

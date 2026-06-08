@@ -1,10 +1,11 @@
 package bbolthelper
 
 import (
-	"reflect"
-	"testing"
 	"os"
 	"path/filepath"
+	"reflect"
+	"testing"
+
 	"go.uber.org/zap"
 )
 
@@ -150,7 +151,7 @@ func TestNewDBStore(t *testing.T) {
 
 			// Special cleanup for the test case that uses the actual DefaultDBPath
 			if tt.name == "empty db path (should use default)" {
-				store.Close() // Close it before removing
+				store.Close()            // Close it before removing
 				os.Remove(DefaultDBPath) // Explicitly remove the default db if created by this test case
 			}
 		})
@@ -269,10 +270,10 @@ func TestDBStore_FindSimilar(t *testing.T) {
 		word string
 		freq string
 	}{
-		{"develop", "100"},      // len 7
-		{"development", "80"},   // len 11
-		{"developer", "90"},     // len 9
-		{"devel", "70"},         // len 5, freq lower than develop
+		{"develop", "100"},    // len 7
+		{"development", "80"}, // len 11
+		{"developer", "90"},   // len 9
+		{"devel", "70"},       // len 5, freq lower than develop
 		{"test", "200"},
 		{"testing", "150"},
 		{"apple", "300"},
@@ -367,4 +368,141 @@ func TestDBStore_FindSimilar(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseCedictLine(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want *cedictEntry
+	}{
+		{
+			name: "normal line same simplified traditional",
+			line: "中文 中文 [Zhong1 wen2] /Chinese language/",
+			want: &cedictEntry{
+				Traditional: "中文",
+				Simplified:  "中文",
+				Pinyin:      "Zhong1 wen2",
+				Definitions: "Chinese language",
+			},
+		},
+		{
+			name: "normal line different simplified traditional",
+			line: "漢字 汉字 [han4 zi4] /Chinese character/CJK character/",
+			want: &cedictEntry{
+				Traditional: "漢字",
+				Simplified:  "汉字",
+				Pinyin:      "han4 zi4",
+				Definitions: "Chinese character/CJK character",
+			},
+		},
+		{
+			name: "comment line",
+			line: "# this is a comment",
+			want: nil,
+		},
+		{
+			name: "percent separator line",
+			line: "%",
+			want: nil,
+		},
+		{
+			name: "empty line",
+			line: "",
+			want: nil,
+		},
+		{
+			name: "malformed line no pinyin brackets",
+			line: "中文 中文 Chinese language",
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseCedictLine(tt.line)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("parseCedictLine() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestImportFromCEDICT(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "bbolthelper_cedict_test_*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	cedictContent := "# CC-CEDICT comment line\n% separator\n中文 中文 [Zhong1 wen2] /Chinese language/\n漢字 汉字 [han4 zi4] /Chinese character/CJK character/\n你好 你好 [ni3 hao3] /Hello!/Hi!/\n"
+	cedictFile := filepath.Join(tempDir, "test_cedict.txt")
+	if err := os.WriteFile(cedictFile, []byte(cedictContent), 0644); err != nil {
+		t.Fatalf("Failed to write test cedict file: %v", err)
+	}
+
+	dbPath := filepath.Join(tempDir, "test_cedict.bbolt")
+	store, err := NewDBStore(Config{
+		DBPath:     dbPath,
+		BucketName: DefaultCedictBucketName,
+		Logger:     zap.NewNop(),
+	})
+	if err != nil {
+		t.Fatalf("NewDBStore() failed: %v", err)
+	}
+	defer store.Close()
+
+	count, err := store.ImportFromCEDICT(cedictFile, 0)
+	if err != nil {
+		t.Fatalf("ImportFromCEDICT() error = %v", err)
+	}
+	if count != 3 {
+		t.Errorf("ImportFromCEDICT() count = %d, want 3", count)
+	}
+
+	t.Run("simplified key lookup", func(t *testing.T) {
+		val, found, err := store.Get("汉字")
+		if err != nil || !found {
+			t.Fatalf("Get(汉字) found=%v, err=%v", found, err)
+		}
+		if val["simplified"] != "汉字" {
+			t.Errorf("simplified field got=%s, want 汉字", val["simplified"])
+		}
+		if val["traditional"] != "漢字" {
+			t.Errorf("traditional field got=%s, want 漢字", val["traditional"])
+		}
+		if val["pinyin"] != "han4 zi4" {
+			t.Errorf("pinyin field got=%s, want han4 zi4", val["pinyin"])
+		}
+	})
+
+	t.Run("traditional key lookup", func(t *testing.T) {
+		val, found, err := store.Get("漢字")
+		if err != nil || !found {
+			t.Fatalf("Get(漢字) found=%v, err=%v", found, err)
+		}
+		if val["simplified"] != "汉字" {
+			t.Errorf("simplified field got=%s, want 汉字", val["simplified"])
+		}
+	})
+
+	t.Run("same simplified and traditional stored once", func(t *testing.T) {
+		val, found, err := store.Get("中文")
+		if err != nil || !found {
+			t.Fatalf("Get(中文) found=%v, err=%v", found, err)
+		}
+		if val["definitions"] != "Chinese language" {
+			t.Errorf("definitions got=%s, want 'Chinese language'", val["definitions"])
+		}
+	})
+
+	t.Run("multiple definitions parsed", func(t *testing.T) {
+		val, found, err := store.Get("你好")
+		if err != nil || !found {
+			t.Fatalf("Get(你好) found=%v, err=%v", found, err)
+		}
+		if val["definitions"] != "Hello!/Hi!" {
+			t.Errorf("definitions got=%s, want 'Hello!/Hi!'", val["definitions"])
+		}
+	})
 }

@@ -1,25 +1,55 @@
-# Makefile for the 'ne' project to simplify Bazel commands.
+# Makefile for the 'ne' project.
 
-# Phony targets are not associated with files, so they will always run.
-.PHONY: all build test clean
+INSTALL_DIR := $(HOME)/.local/bin
+CACHE_DIR   := $(HOME)/.cache/ne
+
+ECDICT_XZ   := assets/ecdict.csv.xz
+ECDICT_CSV  := assets/ecdict.csv
+CEDICT_GZ   := assets/cedict_1_0_ts_utf-8_mdbg.txt.gz
+CEDICT_TXT  := assets/cedict_1_0_ts_utf-8_mdbg.txt
+
+.PHONY: all build test clean install
 
 # The default target when running 'make' without arguments.
 all: build
 
-# Build all targets using Bazel.
-# This compiles the 'ne' and 'kvbuilder' binaries.
-build:
-	@echo "Building project with Bazel..."
-	@bazel build //...
+# Full build: decompress assets -> compile binaries -> build bbolt databases.
+build: $(ECDICT_CSV) $(CEDICT_TXT)
+	@echo "==> Compiling binaries..."
+	@go build -o kvbuilder ./cmd/kvbuilder
+	@go build -o ne ./cmd/ne
+	@echo "==> Building English dictionary database (ecdict.bbolt)..."
+	@mkdir -p $(CACHE_DIR)
+	@./kvbuilder --mode ecdict --csv $(ECDICT_CSV) --dbpath $(CACHE_DIR)/ecdict.bbolt
+	@echo "==> Building Chinese dictionary database (cedict.bbolt)..."
+	@./kvbuilder --mode cedict --csv $(CEDICT_TXT) --dbpath $(CACHE_DIR)/cedict.bbolt
+	@echo "==> Build complete. Databases written to $(CACHE_DIR)/"
 
-# Run all tests defined in the project using Bazel.
+# Decompress English dictionary from .xz if not already done.
+$(ECDICT_CSV): $(ECDICT_XZ)
+	@echo "==> Decompressing $(ECDICT_XZ)..."
+	@xz -dk $(ECDICT_XZ)
+
+# Decompress Chinese dictionary from .gz if not already done.
+$(CEDICT_TXT): $(CEDICT_GZ)
+	@echo "==> Decompressing $(CEDICT_GZ)..."
+	@gunzip -k $(CEDICT_GZ)
+
+# Run all tests.
 test:
-	@echo "Running tests with Bazel..."
-	@bazel test //...
+	@echo "==> Running tests..."
+	@go test ./...
 
-# Clean all Bazel build artifacts, reset the cache, and remove old binaries.
+# Install binaries to ~/.local/bin.
+install: build
+	@echo "==> Installing ne and kvbuilder to $(INSTALL_DIR)..."
+	@mkdir -p $(INSTALL_DIR)
+	@cp ne $(INSTALL_DIR)/ne
+	@cp kvbuilder $(INSTALL_DIR)/kvbuilder
+	@echo "==> Installed. Make sure $(INSTALL_DIR) is in your PATH."
+
+# Clean compiled binaries and decompressed asset files.
 clean:
-	@echo "Cleaning Bazel artifacts and old binaries..."
-	@bazel clean
+	@echo "==> Cleaning binaries and decompressed assets..."
 	@rm -f ne kvbuilder
-	@rm -f assets/ecdict.csv
+	@rm -f $(ECDICT_CSV) $(CEDICT_TXT)

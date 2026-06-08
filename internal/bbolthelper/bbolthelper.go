@@ -1,6 +1,7 @@
 package bbolthelper
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/csv"
 	"encoding/gob"
@@ -21,6 +22,10 @@ const (
 	DefaultTempDBPath = "ecdict.bbolt.tmp" // For compaction
 	DefaultBucketName = "EcdictBucket"
 	DefaultDBFileMode = os.FileMode(0644)
+
+	DefaultCedictDBPath     = "cedict.bbolt"
+	DefaultCedictTempDBPath = "cedict.bbolt.tmp"
+	DefaultCedictBucketName = "CedictBucket"
 )
 
 // DBStore manages interactions with a BoltDB database.
@@ -464,4 +469,136 @@ func (s *DBStore) Compact(tempDBPath string) error {
 	s.logger.Info("The DBStore instance is now closed. Please re-initialize a new DBStore instance to use the compacted database.")
 	// s.db remains nil. The caller is responsible for creating a new DBStore instance.
 	return nil
+}
+
+// cedictEntry holds parsed data from a single CC-CEDICT line.
+type cedictEntry struct {
+	Traditional string
+	Simplified  string
+	Pinyin      string
+	Definitions string
+}
+
+// parseCedictLine parses a single non-comment CC-CEDICT line.
+// Format: Traditional Simplified [pin1 yin1] /def1/def2/.../
+// Returns nil if the line cannot be parsed.
+func parseCedictLine(line string) *cedictEntry {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "%") {
+		return nil
+	}
+
+	// Find pinyin block: [...]
+	pinyinStart := strings.Index(line, "[")
+	pinyinEnd := strings.Index(line, "]")
+	if pinyinStart < 0 || pinyinEnd < 0 || pinyinEnd < pinyinStart {
+		return nil
+	}
+
+	// Parse Traditional and Simplified from the part before [
+	hanzi := strings.Fields(line[:pinyinStart])
+	if len(hanzi) < 2 {
+		return nil
+	}
+	traditional := hanzi[0]
+	simplified := hanzi[1]
+	pinyin := strings.TrimSpace(line[pinyinStart+1 : pinyinEnd])
+
+	// Parse definitions from the part after ]
+	rest := strings.TrimSpace(line[pinyinEnd+1:])
+	if !strings.HasPrefix(rest, "/") {
+		return nil
+	}
+	rest = strings.TrimPrefix(rest, "/")
+	rest = strings.TrimSuffix(rest, "/")
+	definitions := rest // definitions separated by "/"
+
+	return &cedictEntry{
+		Traditional: traditional,
+		Simplified:  simplified,
+		Pinyin:      pinyin,
+		Definitions: definitions,
+	}
+}
+
+// ImportFromCEDICT reads records from a CC-CEDICT text file and stores them in the BoltDB database.
+// Both simplified and traditional Chinese characters are stored as separate keys pointing to the same record.
+// Returns the number of records (unique entries) processed and an error if any occurred.
+func (s *DBStore) ImportFromCEDICT(filePath string, progressReportInterval int) (int, error) {
+	s.logger.Info("Starting CC-CEDICT import...", zap.String("sourceFile", filePath))
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return 0, fmt.Errorf("failed to open CC-CEDICT file '%s': %w", filePath, err)
+	}
+	defer f.Close()
+
+	var recordsProcessed int
+
+	err = s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(s.bucketName))
+		if b == nil {
+			return fmt.Errorf("bucket '%s' unexpectedly not found during CC-CEDICT import", s.bucketName)
+		}
+
+		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+		for scanner.Scan() {
+			line := scanner.Text()
+			entry := parseCedictLine(line)
+			if entry == nil {
+				continue
+			}
+
+			valueMap := map[string]string{
+				"traditional": entry.Traditional,
+				"simplified":  entry.Simplified,
+				"pinyin":      entry.Pinyin,
+				"definitions": entry.Definitions,
+			}
+
+			serialized, serErr := Serialize(valueMap)
+			if serErr != nil {
+				s.logger.Error("Failed to serialize CC-CEDICT record, skipping",
+					zap.String("simplified", entry.Simplified), zap.Error(serErr))
+				continue
+			}
+
+			// Store with simplified key
+			if err := s.putCore(tx, entry.Simplified, serialized); err != nil {
+				s.logger.Error("Failed to put simplified key, skipping",
+					zap.String("key", entry.Simplified), zap.Error(err))
+				continue
+			}
+
+			// Store with traditional key only if it differs from simplified
+			if entry.Traditional != entry.Simplified {
+				if err := s.putCore(tx, entry.Traditional, serialized); err != nil {
+					s.logger.Error("Failed to put traditional key, skipping",
+						zap.String("key", entry.Traditional), zap.Error(err))
+				}
+			}
+
+			recordsProcessed++
+			if progressReportInterval > 0 && recordsProcessed%progressReportInterval == 0 {
+				s.logger.Info("Processed CC-CEDICT records milestone", zap.Int("count", recordsProcessed))
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			return fmt.Errorf("error reading CC-CEDICT file: %w", err)
+		}
+		return nil
+	})
+
+	if err != nil {
+		return recordsProcessed, fmt.Errorf("failed during bbolt transaction for CC-CEDICT import: %w", err)
+	}
+
+	s.logger.Info("Successfully imported CC-CEDICT records.",
+		zap.Int("totalEntries", recordsProcessed),
+		zap.String("dbPath", s.dbPath),
+		zap.String("bucketName", s.bucketName),
+	)
+	return recordsProcessed, nil
 }
