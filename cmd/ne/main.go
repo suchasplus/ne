@@ -17,6 +17,12 @@ import (
 	"go.uber.org/zap"
 )
 
+// version and commit are injected at build time via -ldflags.
+var (
+	version = "dev"
+	commit  = "unknown"
+)
+
 // JsonResult is used for structuring the JSON output
 type JsonResult struct {
 	Term  string            `json:"term"`
@@ -49,6 +55,7 @@ func main() {
 		Name:      "ne",
 		Usage:     "Reads a term from a bbolt key-value store using ecdict.",
 		ArgsUsage: "<term>",
+		Version:   fmt.Sprintf("%s (%s)", version, commit),
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:        "verbose",

@@ -3,6 +3,10 @@
 INSTALL_DIR := $(HOME)/.local/bin
 CACHE_DIR   := $(HOME)/.cache/ne
 
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+LDFLAGS := -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)"
+
 ECDICT_XZ   := assets/ecdict.csv.xz
 ECDICT_CSV  := assets/ecdict.csv
 CEDICT_GZ   := assets/cedict_1_0_ts_utf-8_mdbg.txt.gz
@@ -17,7 +21,7 @@ all: build
 build: $(ECDICT_CSV) $(CEDICT_TXT)
 	@echo "==> Compiling binaries..."
 	@go build -o kvbuilder ./cmd/kvbuilder
-	@go build -o ne ./cmd/ne
+	@go build $(LDFLAGS) -o ne ./cmd/ne
 	@echo "==> Building English dictionary database (ecdict.bbolt)..."
 	@mkdir -p $(CACHE_DIR)
 	@./kvbuilder --mode ecdict --csv $(ECDICT_CSV) --dbpath $(CACHE_DIR)/ecdict.bbolt
